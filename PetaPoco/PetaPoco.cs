@@ -222,6 +222,7 @@ namespace PetaPoco
         T FirstOrDefault<T>(Sql sql);
         bool Exists<T>(object primaryKey);
         int OneTimeCommandTimeout { get; set; }
+        bool Exists<T>(string sql, params object[] args);
     }
 
     public interface IDatabase : IDatabaseQuery
@@ -1238,6 +1239,38 @@ namespace PetaPoco
             var primaryKeyValuePairs = GetPrimaryKeyValues(PocoData.ForType(typeof(T)).TableInfo.PrimaryKey, primaryKey);
             return FirstOrDefault<T>(string.Format("WHERE {0}", BuildPrimaryKeySql(primaryKeyValuePairs, ref index)), primaryKeyValuePairs.Select(x => x.Value).ToArray()) != null;
 		}
+
+
+        public bool Exists<T>(string sql, params object[] args)
+        {
+            var poco = PocoData.ForType(typeof(T)).TableInfo;
+
+            string existsTemplate;
+
+            switch (_dbType)
+            {
+                case DBType.SQLite:
+                case DBType.MySql:
+                    {
+                        existsTemplate = "SELECT EXISTS (SELECT 1 FROM {0} WHERE {1})";
+                        break;
+                    }
+
+                case DBType.SqlServer:
+                    {
+                        existsTemplate = "IF EXISTS (SELECT 1 FROM {0} WHERE {1}) SELECT 1 ELSE SELECT 0";
+                        break;
+                    }
+                default:
+                    {
+                        existsTemplate = "SELECT COUNT(*) FROM {0} WHERE {1}";
+                        break;
+                    }
+            }
+
+
+            return ExecuteScalar<int>(string.Format(existsTemplate, poco.TableName, sql), args) != 0;
+        }
 		public T Single<T>(object primaryKey) 
 		{
             var index = 0;

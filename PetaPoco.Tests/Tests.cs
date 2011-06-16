@@ -651,6 +651,21 @@ namespace PetaPoco.Tests
 			Expect(db.Single<deco>("WHERE id=@0", id), Is.Not.Null);
 		}
 
+        [Test]
+        public void Exists_Query_Does()
+        {
+            var id = InsertRecords(10);
+
+            Expect(db.Exists<deco>("id = @0", id));
+        }
+
+        [Test]
+        public void Exists_Query_DoesNot()
+        {
+            var id = InsertRecords(10);
+            Expect(db.Exists<deco>("id = @0", 12) == false);
+        }
+
 		[Test]
 		[ExpectedException(typeof(InvalidOperationException))]
 		public void Single_Multiple()
