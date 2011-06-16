@@ -228,7 +228,7 @@ namespace PetaPoco
     {
         void Dispose();
         IDbConnection Connection { get; }
-        Transaction GetTransaction();
+        ITransaction GetTransaction();
         void BeginTransaction();
         void AbortTransaction();
         void CompleteTransaction();
@@ -362,7 +362,9 @@ namespace PetaPoco
 			_sharedConnectionDepth++;
 		}
 
-		// Close a previously opened connection
+	    /// <summary>
+        /// Close a previously opened connection
+        /// </summary>
         public void CloseSharedConnection()
 		{
 			if (_sharedConnectionDepth > 0)
@@ -383,7 +385,7 @@ namespace PetaPoco
 		}
 
 		// Helper to create a transaction scope
-		public Transaction GetTransaction()
+		public ITransaction GetTransaction()
 		{
 			return new Transaction(this);
 		}
@@ -2290,8 +2292,13 @@ namespace PetaPoco
 	}
 
 	// Transaction object helps maintain transaction depth counts
-	public class Transaction : IDisposable
-	{
+    public interface ITransaction : IDisposable
+    {
+        void Complete();
+    }
+
+    public class Transaction : ITransaction
+    {
 		public Transaction(Database db)
 		{
 			_db = db;
