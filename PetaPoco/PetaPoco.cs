@@ -242,6 +242,7 @@ namespace PetaPoco
         int Update(object poco, object primaryKeyValue);
         int Update<T>(string sql, params object[] args);
         int Update<T>(Sql sql);
+        void UpdateMany<T>(IEnumerable<T> pocoList);
         int Delete(string tableName, string primaryKeyName, object poco);
         int Delete(string tableName, string primaryKeyName, object poco, object primaryKeyValue);
         int Delete(object poco);
@@ -250,6 +251,8 @@ namespace PetaPoco
         int Delete<T>(object pocoOrPrimaryKey);
         void Save(string tableName, string primaryKeyName, object poco);
         void Save(object poco);
+        void InsertMany<T>(IEnumerable<T> pocoList);
+        void SaveMany<T>(IEnumerable<T> pocoList);
     }
 
     // Database class ... this is where most of the action happens
@@ -1523,6 +1526,19 @@ namespace PetaPoco
 			return Insert(pd.TableInfo.TableName, pd.TableInfo.PrimaryKey, pd.TableInfo.AutoIncrement, poco);
 		}
 
+        public void InsertMany<T>(IEnumerable<T> pocoList)
+        {
+            using (var tran = GetTransaction())
+            {
+                foreach (var poco in pocoList)
+                {
+                    Insert(poco);
+                }
+
+                tran.Complete();
+            }
+        }
+
 		// Update a record with values from a poco.  primary key value can be either supplied or read from the poco
 		public int Update(string tableName, string primaryKeyName, object poco, object primaryKeyValue)
 		{
@@ -1673,7 +1689,21 @@ namespace PetaPoco
 			return Execute(new Sql(string.Format("UPDATE {0}", EscapeTableName(pd.TableInfo.TableName))).Append(sql));
 		}
 
-		public int Delete(string tableName, string primaryKeyName, object poco)
+        public void UpdateMany<T>(IEnumerable<T> pocoList)
+        {
+           using (var tran = GetTransaction())
+            {
+                foreach (var poco in pocoList)
+                {
+                    Update(poco);
+                }
+
+               tran.Complete();
+            }
+        }
+
+
+        public int Delete(string tableName, string primaryKeyName, object poco)
 		{
 			return Delete(tableName, primaryKeyName, poco, null);
 		}
@@ -1726,7 +1756,7 @@ namespace PetaPoco
 			return Execute(new Sql(string.Format("DELETE FROM {0}", EscapeTableName(pd.TableInfo.TableName))).Append(sql));
 		}
 
-		// Check if a poco represents a new record
+        // Check if a poco represents a new record
 		public bool IsNew(string primaryKeyName, object poco)
 		{
 			var pd = PocoData.ForObject(poco, primaryKeyName);
@@ -1789,7 +1819,7 @@ namespace PetaPoco
 		{
 			if (IsNew(primaryKeyName, poco))
 			{
-				Insert(tableName, primaryKeyName, true, poco);
+			    Insert(tableName, primaryKeyName, true, poco);
 			}
 			else
 			{
@@ -1802,6 +1832,19 @@ namespace PetaPoco
 			var pd = PocoData.ForType(poco.GetType());
 			Save(pd.TableInfo.TableName, pd.TableInfo.PrimaryKey, poco);
 		}
+
+        public void SaveMany<T>(IEnumerable<T> pocoList)
+        {
+            using (var tran = GetTransaction())
+            {
+                foreach (var poco in pocoList)
+                {
+                    Save(poco);
+                }
+
+                tran.Complete();
+            }
+        }
 
 		public int CommandTimeout { get; set; }
 		public int OneTimeCommandTimeout { get; set; }
