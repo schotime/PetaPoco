@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using NUnit.Framework;
 
@@ -57,7 +58,7 @@ namespace PetaPoco.Tests
 		}
 
 
-		public Func<object, object> GetFromDbConverter(DestinationInfo destinationInfo, Type SourceType)
+		public Func<object, object> GetFromDbConverter(PropertyInfo pi, Type SourceType)
 		{
 			return null;
 		}
