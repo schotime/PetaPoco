@@ -1,7 +1,7 @@
 <#@ include file="PetaPoco.Core.ttinclude" #>
 <#
 	// Settings
-    ConnectionStringName = "mysql";			// Uses last connection string in config if not specified
+    ConnectionStringName = "";			// Uses last connection string in config if not specified
     Namespace = "";
     RepoName = "";
     GenerateOperations = true;
@@ -9,7 +9,7 @@
 	GenerateCommon = true;
 	ClassPrefix = "";
 	ClassSuffix = "";
-	TrackModifiedColumns = true;
+	TrackModifiedColumns = false;
 
     // Read schema
 	var tables = LoadTables();

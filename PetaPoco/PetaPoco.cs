@@ -1,4 +1,4 @@
-﻿/* PetaPoco v4.0.2 - A Tiny ORMish thing for your POCO's.
+﻿/* PetaPoco v4.0.3 - A Tiny ORMish thing for your POCO's.
  * Copyright © 2011 Topten Software.  All Rights Reserved.
  * 
  * Apache License 2.0 - http://www.toptensoftware.com/petapoco/license
@@ -385,6 +385,7 @@ namespace PetaPoco
 	    /// <summary>
         /// Close a previously opened connection
         /// </summary>
+		// Close a previously opened connection
         public void CloseSharedConnection()
 		{
 			if (_sharedConnectionDepth > 0)
@@ -508,14 +509,26 @@ namespace PetaPoco
 				{
 					var sb = new StringBuilder();
 					foreach (var i in arg_val as System.Collections.IEnumerable)
-					{
-						sb.Append((sb.Length == 0 ? "@" : ",@") + args_dest.Count.ToString());
-						args_dest.Add(i);
-					}
+                    {
+                        var indexOfExistingValue = args_dest.IndexOf(i);
+                        if (indexOfExistingValue >= 0)
+                        {
+                            sb.Append((sb.Length == 0 ? "@" : ",@") + indexOfExistingValue);
+                        } 
+                        else
+                        {
+                            sb.Append((sb.Length == 0 ? "@" : ",@") + args_dest.Count);
+                            args_dest.Add(i);
+                        }
+                    }
 					return sb.ToString();
 				}
 				else
 				{
+				    var indexOfExistingValue = args_dest.IndexOf(arg_val);
+                    if (indexOfExistingValue >= 0)
+                        return "@" + indexOfExistingValue;
+
 					args_dest.Add(arg_val);
 					return "@" + (args_dest.Count - 1).ToString();
 			    }
@@ -600,11 +613,8 @@ namespace PetaPoco
 
 		// Create a command
 		static Regex rxParamsPrefix = new Regex(@"(?<!@)@\w+", RegexOptions.Compiled);
-        public IDbCommand CreateCommand(IDbConnection connection, Sql sqlStatement)
+        IDbCommand CreateCommand(IDbConnection connection, string sql, params object[] args)
 		{
-            var sql = sqlStatement.SQL;
-            var args = sqlStatement.Arguments;
-
 			// Perform parameter prefix replacements
 			if (_paramPrefix != "@")
 				sql = rxParamsPrefix.Replace(sql, m => _paramPrefix + m.Value.Substring(1));
@@ -633,11 +643,11 @@ namespace PetaPoco
 		}
 
 	    // Create a command
-        IDbCommand CreateCommand(IDbConnection connection, string sql, params object[] args)
-        {
-            var sqlStatement = new Sql(sql, args);
-            return CreateCommand(connection, sqlStatement);
-        }
+        //IDbCommand CreateCommand(IDbConnection connection, string sql, params object[] args)
+        //{
+        //    var sqlStatement = new Sql(sql, args);
+        //    return CreateCommand(connection, sqlStatement);
+        //}
 
 	    // Override this to log/capture exceptions
 		public virtual void OnException(Exception x)
@@ -658,14 +668,17 @@ namespace PetaPoco
             return Execute(new Sql(sql, args));
 		}
 
-		public int Execute(Sql sql)
+		public int Execute(Sql Sql)
 		{
+            var sql = Sql.SQL;
+            var args = Sql.Arguments;
+
             try
             {
 				OpenSharedConnection();
                 try
                 {
-                    using (var cmd = CreateCommand(_sharedConnection, sql))
+                    using (var cmd = CreateCommand(_sharedConnection, sql, args))
                     {
                         var result = cmd.ExecuteNonQuery();
                         OnExecutedCommand(cmd);
@@ -690,14 +703,17 @@ namespace PetaPoco
             return ExecuteScalar<T>(new Sql(sql, args));
 		}
 
-		public T ExecuteScalar<T>(Sql sql)
+		public T ExecuteScalar<T>(Sql Sql)
 		{
+            var sql = Sql.SQL;
+            var args = Sql.Arguments;
+
             try
             {
 				OpenSharedConnection();
                 try
                 {
-                    using (var cmd = CreateCommand(_sharedConnection, sql))
+                    using (var cmd = CreateCommand(_sharedConnection, sql, args))
                     {
                         object val = cmd.ExecuteScalar();
                         OnExecutedCommand(cmd);
@@ -716,8 +732,8 @@ namespace PetaPoco
             }
 		}
 
-		Regex rxSelect = new Regex(@"\A\s*(SELECT|EXECUTE|CALL)\s", RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Multiline);
-		Regex rxFrom = new Regex(@"\A\s*FROM\s", RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Multiline);
+		static Regex rxSelect = new Regex(@"\A\s*(SELECT|EXECUTE|CALL)\s", RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Multiline);
+        static Regex rxFrom = new Regex(@"\A\s*FROM\s", RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Multiline);
         string AddSelectClause<T>(string sql)
         {
 			if (sql.StartsWith(";"))
@@ -742,9 +758,6 @@ namespace PetaPoco
 		// Return a typed list of pocos
 		public List<T> Fetch<T>(string sql, params object[] args) 
 		{
-            if (EnableAutoSelect)
-                sql = AddSelectClause<T>(sql);
-
 		    return Fetch<T>(new Sql(sql, args));
 		}
             
@@ -755,7 +768,7 @@ namespace PetaPoco
 
         public List<T> Fetch<T>()
         {
-            return Fetch<T>(AddSelectClause<T>(""));
+            return Fetch<T>("");
         }
 
 		static Regex rxColumns = new Regex(@"\A\s*SELECT\s+((?:\((?>\((?<depth>)|\)(?<-depth>)|.?)*(?(depth)(?!))\)|.)*?)(?<!,\s+)\bFROM\b", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
@@ -776,25 +789,22 @@ namespace PetaPoco
             Group g = m.Groups[1];
             sqlSelectRemoved = sql.Substring(g.Index);
 
-            if (rxDistinct.IsMatch(sqlSelectRemoved))
-                sqlCount = sql.Substring(0, g.Index) + "COUNT(" + m.Groups[1].ToString().Trim() + ") " + sql.Substring(g.Index + g.Length);
-            else
-                sqlCount = sql.Substring(0, g.Index) + "COUNT(*) " + sql.Substring(g.Index + g.Length);
+			if (rxDistinct.IsMatch(sqlSelectRemoved))
+				sqlCount = sql.Substring(0, g.Index) + "COUNT(" + m.Groups[1].ToString().Trim() + ") " + sql.Substring(g.Index + g.Length);
+			else
+				sqlCount = sql.Substring(0, g.Index) + "COUNT(*) " + sql.Substring(g.Index + g.Length);
+
 
 			// Look for an "ORDER BY <whatever>" clause
             m = rxOrderBy.Match(sqlCount);
-			if (!m.Success)
-			{
-				sqlOrderBy = null;
-			}
-			else
-			{
-				g = m.Groups[0];
-			    sqlOrderBy = g.ToString();
-				sqlCount = sqlCount.Substring(0, g.Index) + sqlCount.Substring(g.Index + g.Length);
-			}
+		    if (m.Success)
+		    {
+		        g = m.Groups[0];
+		        sqlOrderBy = g.ToString();
+		        sqlCount = sqlCount.Substring(0, g.Index) + sqlCount.Substring(g.Index + g.Length);
+		    }
 
-			return true;
+		    return true;
 		}
 
 		public void BuildPageQueries<T>(long skip, long take, string sql, ref object[] args, out string sqlCount, out string sqlPage) 
@@ -815,7 +825,7 @@ namespace PetaPoco
                 sqlSelectRemoved = rxOrderBy.Replace(sqlSelectRemoved, "");
 				if (rxDistinct.IsMatch(sqlSelectRemoved))
 				{
-					sqlSelectRemoved = "peta_inner.* FROM (SELECT " + sqlSelectRemoved + ") as peta_inner";
+					sqlSelectRemoved = "peta_inner.* FROM (SELECT " + sqlSelectRemoved + ") peta_inner";
 				}
 				sqlPage = string.Format("SELECT * FROM (SELECT ROW_NUMBER() OVER ({0}) peta_rn, {1}) peta_paged WHERE peta_rn>@{2} AND peta_rn<=@{3}",
 										sqlOrderBy==null ? "ORDER BY (SELECT NULL)" : sqlOrderBy, sqlSelectRemoved, args.Length, args.Length + 1);
@@ -891,18 +901,21 @@ namespace PetaPoco
         // Return an enumerable collection of pocos
         public IEnumerable<T> Query<T>(string sql, params object[] args)
         {
-            if (EnableAutoSelect)
-                sql = AddSelectClause<T>(sql);
-
             return Query<T>(new Sql(sql, args));
         }
 
-        public IEnumerable<T> Query<T>(Sql sql) 
+        public IEnumerable<T> Query<T>(Sql Sql) 
 		{
+            var sql = Sql.SQL;
+            var args = Sql.Arguments;
+
+            if (EnableAutoSelect)
+                sql = AddSelectClause<T>(sql);
+
             OpenSharedConnection();
             try
             {
-                using (var cmd = CreateCommand(_sharedConnection, sql))
+                using (var cmd = CreateCommand(_sharedConnection, sql, args))
                 {
                     IDataReader r;
                     var pd = PocoData.ForType(typeof(T));
@@ -1337,7 +1350,7 @@ namespace PetaPoco
 
 		public string EscapeTableName(string str)
 		{
-			// Assume table names with "dot", or opening sq is already escaped
+			// Assume table names with "dot" are already escaped
 			return str.IndexOf('.') >= 0 ? str : EscapeSqlIdentifier(str);
 		}
 
@@ -1349,8 +1362,10 @@ namespace PetaPoco
 					return string.Format("`{0}`", str);
 
 				case DBType.PostgreSQL:
-				case DBType.Oracle:
 					return string.Format("\"{0}\"", str);
+
+				case DBType.Oracle:
+					return string.Format("\"{0}\"", str.ToUpperInvariant());
 
 				default:
 					return string.Format("[{0}]", str);
@@ -1416,99 +1431,102 @@ namespace PetaPoco
 								string.Join(",", values.ToArray())
 								);
 
-						if (!autoIncrement)
-						{
-							DoPreExecute(cmd);
-							cmd.ExecuteNonQuery();
-							OnExecutedCommand(cmd);
-							return true;
-						}
-
                         object id;
 
-                        switch (_dbType)
-						{
-							case DBType.SqlServerCE:
-								DoPreExecute(cmd);
-								cmd.ExecuteNonQuery();
-								OnExecutedCommand(cmd);
-								id = ExecuteScalar<object>("SELECT @@@IDENTITY AS NewID;");
-								break;
-							case DBType.SqlServer:
-								cmd.CommandText += ";\nSELECT SCOPE_IDENTITY() AS NewID;";
-								DoPreExecute(cmd);
-								id = cmd.ExecuteScalar();
-								OnExecutedCommand(cmd);
-								break;
-							case DBType.PostgreSQL:
-								if (primaryKeyName != null)
-								{
-									cmd.CommandText += string.Format("returning {0} as NewID", EscapeSqlIdentifier(primaryKeyName));
-									DoPreExecute(cmd);
-									id = cmd.ExecuteScalar();
-								}
-								else
-								{
-									id = -1;
-									DoPreExecute(cmd);
-									cmd.ExecuteNonQuery();
-								}
-								OnExecutedCommand(cmd);
-								break;
-							case DBType.Oracle:
-								if (primaryKeyName != null)
-								{
-									cmd.CommandText += string.Format(" returning {0} into :newid", EscapeSqlIdentifier(primaryKeyName));
-									var param = cmd.CreateParameter();
-									param.ParameterName = ":newid";
-									param.Value = DBNull.Value;
-									param.Direction = ParameterDirection.ReturnValue;
-									param.DbType = DbType.Int64;
-									cmd.Parameters.Add(param);
-									DoPreExecute(cmd);
-									cmd.ExecuteNonQuery();
-									id = param.Value;
-								}
-								else
-								{
-									id = -1;
-									DoPreExecute(cmd);
-									cmd.ExecuteNonQuery();
-								}
-								OnExecutedCommand(cmd);
-								break;
-                            case DBType.SQLite:
-                                if (primaryKeyName != null)
-                                {
-                                    cmd.CommandText += ";\nSELECT last_insert_rowid();";
-                                    DoPreExecute(cmd);
-                                    id = cmd.ExecuteScalar();
-                                }
-                                else
-                                {
-                                    id = -1;
+                        if (!autoIncrement)
+                        {
+                            DoPreExecute(cmd);
+                            cmd.ExecuteNonQuery();
+                            OnExecutedCommand(cmd);
+                            id = true;
+                        }
+                        else
+                        {
+
+                            switch (_dbType)
+                            {
+                                case DBType.SqlServerCE:
                                     DoPreExecute(cmd);
                                     cmd.ExecuteNonQuery();
-                                }
-                                OnExecutedCommand(cmd);
-                                break;
-							default:
-								cmd.CommandText += ";\nSELECT @@IDENTITY AS NewID;";
-								DoPreExecute(cmd);
-								id = cmd.ExecuteScalar();
-								OnExecutedCommand(cmd);
-								break;
-						}
+                                    OnExecutedCommand(cmd);
+                                    id = ExecuteScalar<object>("SELECT @@@IDENTITY AS NewID;");
+                                    break;
+                                case DBType.SqlServer:
+                                    cmd.CommandText += ";\nSELECT SCOPE_IDENTITY() AS NewID;";
+                                    DoPreExecute(cmd);
+                                    id = cmd.ExecuteScalar();
+                                    OnExecutedCommand(cmd);
+                                    break;
+                                case DBType.PostgreSQL:
+                                    if (primaryKeyName != null)
+                                    {
+                                        cmd.CommandText += string.Format("returning {0} as NewID", EscapeSqlIdentifier(primaryKeyName));
+                                        DoPreExecute(cmd);
+                                        id = cmd.ExecuteScalar();
+                                    }
+                                    else
+                                    {
+                                        id = -1;
+                                        DoPreExecute(cmd);
+                                        cmd.ExecuteNonQuery();
+                                    }
+                                    OnExecutedCommand(cmd);
+                                    break;
+                                case DBType.Oracle:
+                                    if (primaryKeyName != null)
+                                    {
+                                        cmd.CommandText += string.Format(" returning {0} into :newid", EscapeSqlIdentifier(primaryKeyName));
+                                        var param = cmd.CreateParameter();
+                                        param.ParameterName = ":newid";
+                                        param.Value = DBNull.Value;
+                                        param.Direction = ParameterDirection.ReturnValue;
+                                        param.DbType = DbType.Int64;
+                                        cmd.Parameters.Add(param);
+                                        DoPreExecute(cmd);
+                                        cmd.ExecuteNonQuery();
+                                        id = param.Value;
+                                    }
+                                    else
+                                    {
+                                        id = -1;
+                                        DoPreExecute(cmd);
+                                        cmd.ExecuteNonQuery();
+                                    }
+                                    OnExecutedCommand(cmd);
+                                    break;
+                                case DBType.SQLite:
+                                    if (primaryKeyName != null)
+                                    {
+                                        cmd.CommandText += ";\nSELECT last_insert_rowid();";
+                                        DoPreExecute(cmd);
+                                        id = cmd.ExecuteScalar();
+                                    }
+                                    else
+                                    {
+                                        id = -1;
+                                        DoPreExecute(cmd);
+                                        cmd.ExecuteNonQuery();
+                                    }
+                                    OnExecutedCommand(cmd);
+                                    break;
+                                default:
+                                    cmd.CommandText += ";\nSELECT @@IDENTITY AS NewID;";
+                                    DoPreExecute(cmd);
+                                    id = cmd.ExecuteScalar();
+                                    OnExecutedCommand(cmd);
+                                    break;
+                            }
 
-					    // Assign the ID back to the primary key property
-                        if (primaryKeyName != null)
-						{
-							PocoColumn pc;
-							if (pd.Columns.TryGetValue(primaryKeyName, out pc))
-							{
-								pc.SetValue(poco, pc.ChangeType(id));
-							}
-						}
+                            // Assign the ID back to the primary key property
+                            if (primaryKeyName != null)
+                            {
+                                PocoColumn pc;
+                                if (pd.Columns.TryGetValue(primaryKeyName, out pc))
+                                {
+                                    pc.SetValue(poco, pc.ChangeType(id));
+                                }
+                            }
+                        }
 
                         // Assign the Version column
                         if (!string.IsNullOrEmpty(versionName))
@@ -1615,7 +1633,7 @@ namespace PetaPoco
                         
 
 					    cmd.CommandText = string.Format("UPDATE {0} SET {1} WHERE {2}",
-                                            EscapeSqlIdentifier(tableName), sb.ToString(), BuildPrimaryKeySql(primaryKeyValuePairs, ref index));
+                                            EscapeTableName(tableName), sb.ToString(), BuildPrimaryKeySql(primaryKeyValuePairs, ref index));
 
 					    foreach (var keyValue in primaryKeyValuePairs)
 					    {
@@ -1957,7 +1975,7 @@ namespace PetaPoco
 			public virtual object GetValue(object target) { return PropertyInfo.GetValue(target, null); }
 			public virtual object ChangeType(object val) { return Convert.ChangeType(val, PropertyInfo.PropertyType); }
 		}
-		internal class ExpandoColumn : PocoColumn
+		public class ExpandoColumn : PocoColumn
 		{
 			public override void SetValue(object target, object val) { (target as IDictionary<string, object>)[ColumnName]=val; }
 			public override object GetValue(object target) 
@@ -1968,7 +1986,7 @@ namespace PetaPoco
 			}
 			public override object ChangeType(object val) { return val; }
 		}
-        internal class PocoData
+		public class PocoData
         {
 			public static PocoData ForObject(object o, string primaryKeyName)
 			{
@@ -2246,10 +2264,12 @@ namespace PetaPoco
 							{
 								// Get the PocoColumn for this db column, ignore if not known
 								PocoColumn pc;
-								if (!Columns.TryGetValue(r.GetName(i), out pc))
-									continue;
+							    if (!Columns.TryGetValue(r.GetName(i), out pc) && !Columns.TryGetValue(r.GetName(i).Replace("_", ""), out pc))
+							    {
+							        continue;
+							    }
 
-								// Get the source type for this column
+							    // Get the source type for this column
 								var srcType = r.GetFieldType(i);
 								var dstType = pc.PropertyInfo.PropertyType;
 
