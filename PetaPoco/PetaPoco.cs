@@ -224,6 +224,7 @@ namespace PetaPoco
         Dictionary<TKey, TValue> Dictionary<TKey, TValue>(string sql, params object[] args);
         bool Exists<T>(object primaryKey);
         int OneTimeCommandTimeout { get; set; }
+        bool Exists<T>(string sql, params object[] args);
     }
 
     public interface IDatabase : IDatabaseQuery
@@ -250,6 +251,7 @@ namespace PetaPoco
         int Update(object poco, object primaryKeyValue);
         int Update<T>(string sql, params object[] args);
         int Update<T>(Sql sql);
+        void UpdateMany<T>(IEnumerable<T> pocoList);
         int Delete(string tableName, string primaryKeyName, object poco);
         int Delete(string tableName, string primaryKeyName, object poco, object primaryKeyValue);
         int Delete(object poco);
@@ -258,6 +260,8 @@ namespace PetaPoco
         int Delete<T>(object pocoOrPrimaryKey);
         void Save(string tableName, string primaryKeyName, object poco);
         void Save(object poco);
+        void InsertMany<T>(IEnumerable<T> pocoList);
+        void SaveMany<T>(IEnumerable<T> pocoList);
     }
 
     // Database class ... this is where most of the action happens
@@ -387,6 +391,9 @@ namespace PetaPoco
 			_sharedConnectionDepth++;
 		}
 
+	    /// <summary>
+        /// Close a previously opened connection
+        /// </summary>
 		// Close a previously opened connection
         public void CloseSharedConnection()
 		{
@@ -1337,6 +1344,38 @@ namespace PetaPoco
             var primaryKeyValuePairs = GetPrimaryKeyValues(PocoData.ForType(typeof(T)).TableInfo.PrimaryKey, primaryKey);
             return FirstOrDefault<T>(string.Format("WHERE {0}", BuildPrimaryKeySql(primaryKeyValuePairs, ref index)), primaryKeyValuePairs.Select(x => x.Value).ToArray()) != null;
 		}
+
+
+        public bool Exists<T>(string sql, params object[] args)
+        {
+            var poco = PocoData.ForType(typeof(T)).TableInfo;
+
+            string existsTemplate;
+
+            switch (_dbType)
+            {
+                case DBType.SQLite:
+                case DBType.MySql:
+                    {
+                        existsTemplate = "SELECT EXISTS (SELECT 1 FROM {0} {1})";
+                        break;
+                    }
+
+                case DBType.SqlServer:
+                    {
+                        existsTemplate = "IF EXISTS (SELECT 1 FROM {0} {1}) SELECT 1 ELSE SELECT 0";
+                        break;
+                    }
+                default:
+                    {
+                        existsTemplate = "SELECT COUNT(*) FROM {0} {1}";
+                        break;
+                    }
+            }
+
+
+            return ExecuteScalar<int>(string.Format(existsTemplate, poco.TableName, sql), args) != 0;
+        }
 		public T Single<T>(object primaryKey) 
 		{
             var index = 0;
@@ -1625,6 +1664,19 @@ namespace PetaPoco
 			return Insert(pd.TableInfo.TableName, pd.TableInfo.PrimaryKey, pd.TableInfo.AutoIncrement, poco);
 		}
 
+        public void InsertMany<T>(IEnumerable<T> pocoList)
+        {
+            using (var tran = GetTransaction())
+            {
+                foreach (var poco in pocoList)
+                {
+                    Insert(poco);
+                }
+
+                tran.Complete();
+            }
+        }
+
 		public int Update(string tableName, string primaryKeyName, object poco, object primaryKeyValue)
 		{
 			return Update(tableName, primaryKeyName, poco, primaryKeyValue, null);
@@ -1802,7 +1854,21 @@ namespace PetaPoco
 			return Execute(new Sql(string.Format("UPDATE {0}", EscapeTableName(pd.TableInfo.TableName))).Append(sql));
 		}
 
-		public int Delete(string tableName, string primaryKeyName, object poco)
+        public void UpdateMany<T>(IEnumerable<T> pocoList)
+        {
+           using (var tran = GetTransaction())
+            {
+                foreach (var poco in pocoList)
+                {
+                    Update(poco);
+                }
+
+               tran.Complete();
+            }
+        }
+
+
+        public int Delete(string tableName, string primaryKeyName, object poco)
 		{
 			return Delete(tableName, primaryKeyName, poco, null);
 		}
@@ -1855,7 +1921,7 @@ namespace PetaPoco
 			return Execute(new Sql(string.Format("DELETE FROM {0}", EscapeTableName(pd.TableInfo.TableName))).Append(sql));
 		}
 
-		// Check if a poco represents a new record
+        // Check if a poco represents a new record
 		public bool IsNew(string primaryKeyName, object poco)
 		{
 			var pd = PocoData.ForObject(poco, primaryKeyName);
@@ -1918,7 +1984,7 @@ namespace PetaPoco
 		{
 			if (IsNew(primaryKeyName, poco))
 			{
-				Insert(tableName, primaryKeyName, true, poco);
+			    Insert(tableName, primaryKeyName, true, poco);
 			}
 			else
 			{
@@ -1931,6 +1997,19 @@ namespace PetaPoco
 			var pd = PocoData.ForType(poco.GetType());
 			Save(pd.TableInfo.TableName, pd.TableInfo.PrimaryKey, poco);
 		}
+
+        public void SaveMany<T>(IEnumerable<T> pocoList)
+        {
+            using (var tran = GetTransaction())
+            {
+                foreach (var poco in pocoList)
+                {
+                    Save(poco);
+                }
+
+                tran.Complete();
+            }
+        }
 
 		public int CommandTimeout { get; set; }
 		public int OneTimeCommandTimeout { get; set; }
@@ -2539,8 +2618,13 @@ namespace PetaPoco
 	}
 
 	// Transaction object helps maintain transaction depth counts
-	public class Transaction : IDisposable
-	{
+    public interface ITransaction : IDisposable
+    {
+        void Complete();
+    }
+
+    public class Transaction : ITransaction
+    {
 	    public Transaction(Database db) : this(db, null) { }
 
 		public Transaction(Database db, IsolationLevel? isolationLevel)
