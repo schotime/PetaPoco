@@ -11,46 +11,46 @@ namespace PetaPoco
     {
         public static List<T> FetchOneToMany<T, T1>(this IDatabase db, Func<T, object> key, Sql Sql)
         {
-            return db.FetchOneToMany<T, T1>(key, Sql.SQL, Sql.Arguments);
+            var relator = new Relator();
+            return db.Fetch<T, T1, T>((a, b) => relator.OneToMany(a, b, key), Sql);
         }
 
         public static List<T> FetchManyToOne<T, T1>(this IDatabase db, Func<T, object> key, Sql Sql)
         {
-            return db.FetchManyToOne<T, T1>(key, Sql.SQL, Sql.Arguments);
+            var relator = new Relator();
+            return db.Fetch<T, T1, T>((a, b) => relator.ManyToOne(a, b, key), Sql);
         }
 
         public static List<T> FetchManyToOne<T, T1, T2>(this IDatabase db, Func<T, object> key, Sql Sql)
         {
-            return db.FetchManyToOne<T, T1, T2>(key, Sql.SQL, Sql.Arguments);
+            var relator = new Relator();
+            return db.Fetch<T, T1, T2, T>((a, b, c) => relator.ManyToOne(a, b, c, key), Sql);
         }
 
         public static List<T> FetchManyToOne<T, T1, T2, T3>(this IDatabase db, Func<T, object> key, Sql Sql)
         {
-            return db.FetchManyToOne<T, T1, T2, T3>(key, Sql.SQL, Sql.Arguments);
+            var relator = new Relator();
+            return db.Fetch<T, T1, T2, T3, T>((a, b, c, d) => relator.ManyToOne(a, b, c, d, key), Sql);
         }
 
         public static List<T> FetchOneToMany<T, T1>(this IDatabase db, Func<T, object> key, string sql, params object[] args)
         {
-            var relator = new Relator();
-            return db.Fetch<T, T1, T>((a, b) => relator.OneToMany(a, b, key), sql, args);
+            return db.FetchOneToMany<T, T1>(key, new Sql(sql, args));
         }
 
         public static List<T> FetchManyToOne<T, T1>(this IDatabase db, Func<T, object> key, string sql, params object[] args)
         {
-            var relator = new Relator();
-            return db.Fetch<T, T1, T>((a, b) => relator.ManyToOne(a, b, key), sql, args);
+            return db.FetchManyToOne<T, T1>(key, new Sql(sql, args));
         }
 
         public static List<T> FetchManyToOne<T, T1, T2>(this IDatabase db, Func<T, object> key, string sql, params object[] args)
         {
-            var relator = new Relator();
-            return db.Fetch<T, T1, T2, T>((a, b, c) => relator.ManyToOne(a, b, c, key), sql, args);
+            return db.FetchManyToOne<T, T1, T2>(key, new Sql(sql, args));
         }
 
         public static List<T> FetchManyToOne<T, T1, T2, T3>(this IDatabase db, Func<T, object> key, string sql, params object[] args)
         {
-            var relator = new Relator();
-            return db.Fetch<T, T1, T2, T3, T>((a, b, c, d) => relator.ManyToOne(a, b, c, d, key), sql, args);
+            return db.FetchManyToOne<T, T1, T2, T3>(key, new Sql(sql, args));
         }
     }
 

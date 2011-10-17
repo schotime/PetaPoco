@@ -1,5 +1,5 @@
-﻿/* PetaPoco v4.0.3 - A Tiny ORMish thing for your POCO's.
- * Copyright © 2011 Topten Software.  All Rights Reserved.
+/* PetaPoco v4.0.3.2 - A Tiny ORMish thing for your POCO's.
+ * Copyright � 2011 Topten Software.  All Rights Reserved.
  * 
  * Apache License 2.0 - http://www.toptensoftware.com/petapoco/license
  * 
@@ -22,7 +22,6 @@ using System.Text.RegularExpressions;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Linq.Expressions;
-
 
 namespace PetaPoco
 {
@@ -138,7 +137,7 @@ namespace PetaPoco
         Func<object, object> GetFromDbConverter(Type DestType, Type SourceType);
     }
 
-    public class DefaultMapper : IMapper2
+    public abstract class DefaultMapper : IMapper2
     {
         public virtual void GetTableInfo(Type t, TableInfo ti) { }
         public virtual bool MapPropertyToColumn(PropertyInfo pi, ref string columnName, ref bool resultColumn)
@@ -147,7 +146,7 @@ namespace PetaPoco
         }
         public virtual Func<object, object> GetFromDbConverter(PropertyInfo pi, Type SourceType)
         {
-            return null;
+            return GetFromDbConverter(pi.PropertyType, SourceType);
         }
         public virtual Func<object, object> GetToDbConverter(Type SourceType)
         {
@@ -158,23 +157,6 @@ namespace PetaPoco
             return null;
         }
     }
-
-    //public class DestinationInfo
-    //{
-    //    public DestinationInfo(Type type)
-    //    {
-    //        Type = type;
-    //    }
-
-    //    public DestinationInfo(PropertyInfo propertyInfo)
-    //    {
-    //        PropertyInfo = propertyInfo;
-    //        Type = propertyInfo.PropertyType;
-    //    }
-
-    //    public PropertyInfo PropertyInfo { get; private set; }
-    //    public Type Type { get; private set; }
-    //}
 
     public interface IDatabaseQuery
     {
@@ -223,13 +205,23 @@ namespace PetaPoco
         T Single<T>(object primaryKey);
         T SingleOrDefault<T>(object primaryKey);
         T Single<T>(string sql, params object[] args);
+        T Single<T>(T instance, string sql, params object[] args);
         T SingleOrDefault<T>(string sql, params object[] args);
+        T SingleOrDefault<T>(T instance, string sql, params object[] args);
         T First<T>(string sql, params object[] args);
+        T First<T>(T instance, string sql, params object[] args);
         T FirstOrDefault<T>(string sql, params object[] args);
+        T FirstOrDefault<T>(T instance, string sql, params object[] args);
         T Single<T>(Sql sql);
+        T Single<T>(T instance, Sql sql);
         T SingleOrDefault<T>(Sql sql);
+        T SingleOrDefault<T>(T instance, Sql sql);
         T First<T>(Sql sql);
+        T First<T>(T instance, Sql sql);
         T FirstOrDefault<T>(Sql sql);
+        T FirstOrDefault<T>(T instance, Sql sql);
+        Dictionary<TKey, TValue> Dictionary<TKey, TValue>(Sql Sql);
+        Dictionary<TKey, TValue> Dictionary<TKey, TValue>(string sql, params object[] args);
         bool Exists<T>(object primaryKey);
         int OneTimeCommandTimeout { get; set; }
         bool Exists<T>(string sql, params object[] args);
@@ -239,7 +231,8 @@ namespace PetaPoco
     {
         void Dispose();
         IDbConnection Connection { get; }
-        ITransaction GetTransaction();
+        IDataParameter CreateParameter();
+        Transaction GetTransaction();
         Transaction GetTransaction(IsolationLevel? isolationLevel);
         void BeginTransaction();
         void BeginTransaction(IsolationLevel? isolationLevel);
@@ -336,7 +329,7 @@ namespace PetaPoco
             SQLite
 		}
 
-        private DBType _dbType = DBType.NotSet;
+        protected DBType _dbType = DBType.NotSet;
 
 		// Common initialization
 		private void CommonConstruct()
@@ -416,14 +409,27 @@ namespace PetaPoco
 		    }
 		}
 
+        public VersionExceptionHandling VersionException
+        {
+            get { return _versionException; }
+            set { _versionException = value; }
+        }
+
 		// Access to our shared connection
 		public IDbConnection Connection
 		{
 			get { return _sharedConnection; }
 		}
 
+        public IDataParameter CreateParameter()
+        {
+            using (var conn = _sharedConnection ?? _factory.CreateConnection())
+            using (var comm = conn.CreateCommand())
+                return comm.CreateParameter();
+        }
+
 		// Helper to create a transaction scope
-		public ITransaction GetTransaction()
+		public Transaction GetTransaction()
 		{
 			return GetTransaction(null);
 		}
@@ -547,6 +553,10 @@ namespace PetaPoco
                             args_dest.Add(i);
                         }
                     }
+                    if (sb.Length == 0)
+                    {
+                        sb.AppendFormat("select 1 /*peta_dual*/ where 1 = 0");
+                    }
 					return sb.ToString();
 				}
 				else
@@ -658,22 +668,16 @@ namespace PetaPoco
 			}
 
 			if (_dbType == DBType.Oracle)
-			{
 				cmd.GetType().GetProperty("BindByName").SetValue(cmd, true, null);
-			}
+
+            if (_dbType == DBType.Oracle || _dbType == DBType.MySql)
+                cmd.CommandText = cmd.CommandText.Replace("/*peta_dual*/", "from dual");
 
 			if (!String.IsNullOrEmpty(sql))
 				DoPreExecute(cmd);
 
 			return cmd;
 		}
-
-	    // Create a command
-        //IDbCommand CreateCommand(IDbConnection connection, string sql, params object[] args)
-        //{
-        //    var sqlStatement = new Sql(sql, args);
-        //    return CreateCommand(connection, sqlStatement);
-        //}
 
 	    // Override this to log/capture exceptions
 		public virtual void OnException(Exception x)
@@ -758,7 +762,7 @@ namespace PetaPoco
             }
 		}
 
-		static Regex rxSelect = new Regex(@"\A\s*(SELECT|EXECUTE|CALL)\s", RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Multiline);
+		static Regex rxSelect = new Regex(@"\A\s*(SELECT|EXECUTE|CALL|EXEC)\s", RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Multiline);
         static Regex rxFrom = new Regex(@"\A\s*FROM\s", RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Multiline);
         string AddSelectClause<T>(string sql)
         {
@@ -967,7 +971,12 @@ namespace PetaPoco
             return Query<T>(new Sql(sql, args));
         }
 
-        public IEnumerable<T> Query<T>(Sql Sql) 
+        public IEnumerable<T> Query<T>(Sql Sql)
+        {
+            return Query<T>(default(T), Sql);
+        }
+
+        private IEnumerable<T> Query<T>(T instance, Sql Sql) 
 		{
             var sql = Sql.SQL;
             var args = Sql.Arguments;
@@ -995,7 +1004,7 @@ namespace PetaPoco
 					
                     using (r)
                     {
-                        var factory = pd.GetFactory(cmd.CommandText, _sharedConnection.ConnectionString, ForceDateTimesToUtc, 0, r.FieldCount, r) as Func<IDataReader, T>;
+                        var factory = pd.GetFactory(cmd.CommandText, _sharedConnection.ConnectionString, ForceDateTimesToUtc, 0, r.FieldCount, r, instance) as Func<IDataReader, T, T>;
                         while (true)
                         {
                             T poco;
@@ -1003,7 +1012,7 @@ namespace PetaPoco
                             {
                                 if (!r.Read())
                                     yield break;
-                                poco = factory(r);
+                                poco = factory(r, instance);
                             }
                             catch (Exception x)
                             {
@@ -1142,7 +1151,7 @@ namespace PetaPoco
 		{
 			// Last?
 			if (typeNext == null)
-				return PocoData.ForType(typeThis).GetFactory(sql, _sharedConnection.ConnectionString, ForceDateTimesToUtc, pos, r.FieldCount - pos, r);
+				return PocoData.ForType(typeThis).GetFactory(sql, _sharedConnection.ConnectionString, ForceDateTimesToUtc, pos, r.FieldCount - pos, r, null);
 
 			// Get PocoData for the two types
 			PocoData pdThis = PocoData.ForType(typeThis);
@@ -1157,7 +1166,7 @@ namespace PetaPoco
 				string fieldName = r.GetName(pos);
 				if (usedColumns.ContainsKey(fieldName) || (!pdThis.Columns.ContainsKey(fieldName) && pdNext.Columns.ContainsKey(fieldName)))
 				{
-					return pdThis.GetFactory(sql, _sharedConnection.ConnectionString, ForceDateTimesToUtc, firstColumn, pos - firstColumn, r);
+					return pdThis.GetFactory(sql, _sharedConnection.ConnectionString, ForceDateTimesToUtc, firstColumn, pos - firstColumn, r, null);
 				}
 				usedColumns.Add(fieldName, true);
 			}
@@ -1195,6 +1204,7 @@ namespace PetaPoco
 				il.Emit(OpCodes.Ldc_I4, i);													// callback,this,Index
 				il.Emit(OpCodes.Callvirt, typeof(MultiPocoFactory).GetMethod("GetItem"));	// callback,Delegate
 				il.Emit(OpCodes.Ldarg_1);													// callback,delegate, datareader
+                il.Emit(OpCodes.Ldnull);                                                    // callback,delegate, datareader,null
 
 				// Call Invoke
 				var tDelInvoke = del.GetType().GetMethod("Invoke");
@@ -1382,35 +1392,66 @@ namespace PetaPoco
 		{
 			return Query<T>(sql, args).Single();
 		}
+        public T Single<T>(T instance, string sql, params object[] args)
+        {
+            return Query<T>(instance, new Sql(sql, args)).Single();
+        }
 		public T SingleOrDefault<T>(string sql, params object[] args) 
 		{
 			return Query<T>(sql, args).SingleOrDefault();
 		}
+        public T SingleOrDefault<T>(T instance, string sql, params object[] args)
+        {
+            return Query<T>(instance, new Sql(sql, args)).SingleOrDefault();
+        }
 		public T First<T>(string sql, params object[] args) 
 		{
 			return Query<T>(sql, args).First();
 		}
+        public T First<T>(T instance, string sql, params object[] args)
+        {
+            return Query<T>(instance, new Sql(sql, args)).First();
+        }
 		public T FirstOrDefault<T>(string sql, params object[] args) 
 		{
 			return Query<T>(sql, args).FirstOrDefault();
 		}
+        public T FirstOrDefault<T>(T instance, string sql, params object[] args)
+        {
+            return Query<T>(instance, new Sql(sql, args)).FirstOrDefault();
+        }
 		public T Single<T>(Sql sql) 
 		{
             return Query<T>(sql).Single();
 		}
+        public T Single<T>(T instance, Sql sql)
+        {
+            return Query<T>(instance, sql).Single();
+        }
 		public T SingleOrDefault<T>(Sql sql) 
 		{
 			return Query<T>(sql).SingleOrDefault();
 		}
+        public T SingleOrDefault<T>(T instance, Sql sql)
+        {
+            return Query<T>(instance, sql).SingleOrDefault();
+        }
 		public T First<T>(Sql sql) 
 		{
 			return Query<T>(sql).First();
 		}
+        public T First<T>(T instance, Sql sql)
+        {
+            return Query<T>(instance, sql).First();
+        }
 		public T FirstOrDefault<T>(Sql sql) 
 		{
 			return Query<T>(sql).FirstOrDefault();
 		}
-
+        public T FirstOrDefault<T>(T instance, Sql sql)
+        {
+            return Query<T>(instance, sql).FirstOrDefault();
+        }
 		public string EscapeTableName(string str)
 		{
 			// Assume table names with "dot" are already escaped
@@ -1711,8 +1752,11 @@ namespace PetaPoco
 
 						DoPreExecute(cmd);
 
-						// Do it
 						var result = cmd.ExecuteNonQuery();
+
+                        if (result == 0 && !string.IsNullOrEmpty(versionName) && VersionException == VersionExceptionHandling.Exception)
+                            throw new DBConcurrencyException(string.Format("A Concurrency update occured in table '{0}' for primary key value(s) = '{1}' and version = '{2}'", tableName, string.Join(",", primaryKeyValuePairs.Values.Select(x=>x.ToString()).ToArray()), versionValue));
+
                         OnExecutedCommand(cmd);
 
                         // Set Version
@@ -2021,13 +2065,18 @@ namespace PetaPoco
 			return sb.ToString();
 		}
 
+        public enum VersionExceptionHandling
+        {
+            Ignore,
+            Exception
+        }
 
 		public static IMapper Mapper
 		{
 			get;
 			set;
 		}
-
+        
 		public class PocoColumn
 		{
 			public string ColumnName;
@@ -2194,11 +2243,20 @@ namespace PetaPoco
                 return tc >= TypeCode.SByte && tc <= TypeCode.UInt64;
             }
 
+            static object GetDefault(Type type)
+            {
+                if (type.IsValueType)
+                {
+                    return Activator.CreateInstance(type);
+                }
+                return null;
+            }
+
             // Create factory function that can convert a IDataReader record into a POCO
-			public Delegate GetFactory(string sql, string connString, bool ForceDateTimesToUtc, int firstColumn, int countColumns, IDataReader r)
+			public Delegate GetFactory(string sql, string connString, bool ForceDateTimesToUtc, int firstColumn, int countColumns, IDataReader r, object instance)
             {
 				// Check cache
-				var key = string.Format("{0}:{1}:{2}:{3}:{4}", sql, connString, ForceDateTimesToUtc, firstColumn, countColumns);
+                var key = string.Format("{0}:{1}:{2}:{3}:{4}:{5}", sql, connString, ForceDateTimesToUtc, firstColumn, countColumns, instance != GetDefault(type));
 				RWLock.EnterReadLock();
 				try
                 {
@@ -2217,14 +2275,13 @@ namespace PetaPoco
 
 				try
                 {
-
-                	// Check again, just in case
+                    // Check again, just in case
 					Delegate factory;
 					if (PocoFactories.TryGetValue(key, out factory))
 						return factory;
-					
+			
                     // Create the method
-                    var m = new DynamicMethod("petapoco_factory_" + PocoFactories.Count.ToString(), type, new Type[] { typeof(IDataReader) }, true);
+                    var m = new DynamicMethod("petapoco_factory_" + PocoFactories.Count.ToString(), type, new Type[] { typeof(IDataReader), type }, true);
 					var il = m.GetILGenerator();
 
 #if !PETAPOCO_NO_DYNAMIC
@@ -2319,7 +2376,7 @@ namespace PetaPoco
 						}
                         else if (type == typeof(Dictionary<string, object>))
                         {
-                            Func<IDataReader, Dictionary<string, object>> func = reader =>
+                            Func<IDataReader, object, Dictionary<string, object>> func = (reader, inst) =>
                             {
                                 var dict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
                                 for (int i = firstColumn; i < firstColumn + countColumns; i++)
@@ -2332,100 +2389,122 @@ namespace PetaPoco
                                 return dict;
                             };
 
-                            var localDel = Delegate.CreateDelegate(typeof(Func<IDataReader, Dictionary<string, object>>), func.Target, func.Method);
+                            var delegateType = typeof(Func<,,>).MakeGenericType(typeof(IDataReader), type, typeof(Dictionary<string, object>));
+                            var localDel = Delegate.CreateDelegate(delegateType, func.Target, func.Method);
                             PocoFactories.Add(key, localDel);
                             return localDel;
                         }
-						else
-						{
-							// var poco=new T()
-							il.Emit(OpCodes.Newobj, type.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new Type[0], null));
+                        else if (type == typeof(object[]))
+                        {
+                            Func<IDataReader, object, object[]> func = (reader, inst) =>
+                            {
+                                var obj = new object[countColumns - firstColumn];
+                                for (int i = firstColumn; i < firstColumn + countColumns; i++)
+                                {
+                                    var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                                    obj[i - firstColumn] = value;
+                                }
+                                return obj;
+                            };
 
-							// Enumerate all fields generating a set assignment for the column
-							for (int i = firstColumn; i < firstColumn + countColumns; i++)
-							{
-								// Get the PocoColumn for this db column, ignore if not known
-								PocoColumn pc;
-							    if (!Columns.TryGetValue(r.GetName(i), out pc) && !Columns.TryGetValue(r.GetName(i).Replace("_", ""), out pc))
-							    {
-							        continue;
-							    }
+                            var delegateType = typeof(Func<,,>).MakeGenericType(typeof(IDataReader), type, typeof(object[]));
+                            var localDel = Delegate.CreateDelegate(delegateType, func.Target, func.Method);
+                            PocoFactories.Add(key, localDel);
+                            return localDel;
+                        }
+                        else
+                        {
+                            if (instance != null)
+                                il.Emit(OpCodes.Ldarg_1);
+                            else
+                                // var poco=new T()
+                                il.Emit(OpCodes.Newobj, type.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new Type[0], null));
 
-							    // Get the source type for this column
-								var srcType = r.GetFieldType(i);
-								var dstType = pc.PropertyInfo.PropertyType;
+                            // Enumerate all fields generating a set assignment for the column
+                            for (int i = firstColumn; i < firstColumn + countColumns; i++)
+                            {
+                                // Get the PocoColumn for this db column, ignore if not known
+                                PocoColumn pc;
+                                if (!Columns.TryGetValue(r.GetName(i), out pc) && !Columns.TryGetValue(r.GetName(i).Replace("_", ""), out pc))
+                                {
+                                    continue;
+                                }
 
-								// "if (!rdr.IsDBNull(i))"
-								il.Emit(OpCodes.Ldarg_0);										// poco,rdr
-								il.Emit(OpCodes.Ldc_I4, i);										// poco,rdr,i
-								il.Emit(OpCodes.Callvirt, fnIsDBNull);							// poco,bool
-								var lblNext = il.DefineLabel();
-								il.Emit(OpCodes.Brtrue_S, lblNext);								// poco
+                                // Get the source type for this column
+                                var srcType = r.GetFieldType(i);
+                                var dstType = pc.PropertyInfo.PropertyType;
 
-								il.Emit(OpCodes.Dup);											// poco,poco
+                                // "if (!rdr.IsDBNull(i))"
+                                il.Emit(OpCodes.Ldarg_0);										// poco,rdr
+                                il.Emit(OpCodes.Ldc_I4, i);										// poco,rdr,i
+                                il.Emit(OpCodes.Callvirt, fnIsDBNull);							// poco,bool
+                                var lblNext = il.DefineLabel();
+                                il.Emit(OpCodes.Brtrue_S, lblNext);								// poco
 
-								// Do we need to install a converter?
-								var converter = GetConverter(ForceDateTimesToUtc, pc, srcType, dstType);
+                                il.Emit(OpCodes.Dup);											// poco,poco
 
-							    // Fast
-								bool Handled = false;
-								if (converter == null)
-								{
-									var valuegetter = typeof(IDataRecord).GetMethod("Get" + srcType.Name, new Type[] { typeof(int) });
-									if (valuegetter != null
-											&& valuegetter.ReturnType == srcType
-											&& (valuegetter.ReturnType == dstType || valuegetter.ReturnType == Nullable.GetUnderlyingType(dstType)))
-									{
-										il.Emit(OpCodes.Ldarg_0);										// *,rdr
-										il.Emit(OpCodes.Ldc_I4, i);										// *,rdr,i
-										il.Emit(OpCodes.Callvirt, valuegetter);							// *,value
+                                // Do we need to install a converter?
+                                var converter = GetConverter(ForceDateTimesToUtc, pc, srcType, dstType);
 
-										// Convert to Nullable
-										if (Nullable.GetUnderlyingType(dstType) != null)
-										{
-											il.Emit(OpCodes.Newobj, dstType.GetConstructor(new Type[] { Nullable.GetUnderlyingType(dstType) }));
-										}
+                                // Fast
+                                bool Handled = false;
+                                if (converter == null)
+                                {
+                                    var valuegetter = typeof(IDataRecord).GetMethod("Get" + srcType.Name, new Type[] { typeof(int) });
+                                    if (valuegetter != null
+                                            && valuegetter.ReturnType == srcType
+                                            && (valuegetter.ReturnType == dstType || valuegetter.ReturnType == Nullable.GetUnderlyingType(dstType)))
+                                    {
+                                        il.Emit(OpCodes.Ldarg_0);										// *,rdr
+                                        il.Emit(OpCodes.Ldc_I4, i);										// *,rdr,i
+                                        il.Emit(OpCodes.Callvirt, valuegetter);							// *,value
 
-										il.Emit(OpCodes.Callvirt, pc.PropertyInfo.GetSetMethod(true));		// poco
-										Handled = true;
-									}
-								}
+                                        // Convert to Nullable
+                                        if (Nullable.GetUnderlyingType(dstType) != null)
+                                        {
+                                            il.Emit(OpCodes.Newobj, dstType.GetConstructor(new Type[] { Nullable.GetUnderlyingType(dstType) }));
+                                        }
 
-								// Not so fast
-								if (!Handled)
-								{
-									// Setup stack for call to converter
-									AddConverterToStack(il, converter);
+                                        il.Emit(OpCodes.Callvirt, pc.PropertyInfo.GetSetMethod(true));		// poco
+                                        Handled = true;
+                                    }
+                                }
 
-								    // "value = rdr.GetValue(i)"
-									il.Emit(OpCodes.Ldarg_0);										// *,rdr
-									il.Emit(OpCodes.Ldc_I4, i);										// *,rdr,i
-									il.Emit(OpCodes.Callvirt, fnGetValue);							// *,value
+                                // Not so fast
+                                if (!Handled)
+                                {
+                                    // Setup stack for call to converter
+                                    AddConverterToStack(il, converter);
 
-									// Call the converter
-									if (converter != null)
-										il.Emit(OpCodes.Callvirt, fnInvoke);
+                                    // "value = rdr.GetValue(i)"
+                                    il.Emit(OpCodes.Ldarg_0);										// *,rdr
+                                    il.Emit(OpCodes.Ldc_I4, i);										// *,rdr,i
+                                    il.Emit(OpCodes.Callvirt, fnGetValue);							// *,value
 
-									// Assign it
-									il.Emit(OpCodes.Unbox_Any, pc.PropertyInfo.PropertyType);		// poco,poco,value
-									il.Emit(OpCodes.Callvirt, pc.PropertyInfo.GetSetMethod(true));		// poco
-								}
+                                    // Call the converter
+                                    if (converter != null)
+                                        il.Emit(OpCodes.Callvirt, fnInvoke);
 
-								il.MarkLabel(lblNext);
-							}
+                                    // Assign it
+                                    il.Emit(OpCodes.Unbox_Any, pc.PropertyInfo.PropertyType);		// poco,poco,value
+                                    il.Emit(OpCodes.Callvirt, pc.PropertyInfo.GetSetMethod(true));		// poco
+                                }
 
-							var fnOnLoaded = RecurseInheritedTypes<MethodInfo>(type, (x) => x.GetMethod("OnLoaded", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new Type[0], null));
-							if (fnOnLoaded != null)
-							{
-								il.Emit(OpCodes.Dup);
-								il.Emit(OpCodes.Callvirt, fnOnLoaded);
-						    }
-						}
+                                il.MarkLabel(lblNext);
+                            }
+
+                            var fnOnLoaded = RecurseInheritedTypes<MethodInfo>(type, (x) => x.GetMethod("OnLoaded", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new Type[0], null));
+                            if (fnOnLoaded != null)
+                            {
+                                il.Emit(OpCodes.Dup);
+                                il.Emit(OpCodes.Callvirt, fnOnLoaded);
+                            }
+                        }
 
 					il.Emit(OpCodes.Ret);
 
 					// Cache it, return it
-                    var del = m.CreateDelegate(Expression.GetFuncType(typeof(IDataReader), type));
+                    var del = m.CreateDelegate(Expression.GetFuncType(typeof(IDataReader), type, type));
                     PocoFactories.Add(key, del);
                     return del;
                 }
@@ -2535,6 +2614,7 @@ namespace PetaPoco
 		string _lastSql;
 		object[] _lastArgs;
 		string _paramPrefix = "@";
+        VersionExceptionHandling _versionException = VersionExceptionHandling.Ignore;
 	}
 
 	// Transaction object helps maintain transaction depth counts
@@ -2581,12 +2661,23 @@ namespace PetaPoco
 			_args = args;
 		}
 
+        public Sql(bool isBuilt, string sql, params object[] args)
+        {
+            _sql = sql;
+            _args = args;
+            if (isBuilt)
+            {
+                _sqlFinal = _sql;
+                _argsFinal = _args;
+            }
+        }
+
 		public static Sql Builder
 		{
 			get { return new Sql(); }
 		}
 
-		string _sql;
+	    string _sql;
 		object[] _args;
 		Sql _rhs;
 		string _sqlFinal;
@@ -2626,12 +2717,25 @@ namespace PetaPoco
 
 		public Sql Append(Sql sql)
 		{
-			if (_rhs != null)
-				_rhs.Append(sql);
-			else
-				_rhs = sql;
+            if (_sqlFinal != null)
+                _sqlFinal = null;
 
-			return this;
+            if (_rhs != null)
+            {
+                _rhs.Append(sql);
+            }
+            else if (_sql != null)
+            {
+                _rhs = sql;
+            }
+            else
+            {
+                _sql = sql._sql;
+                _args = sql._args;
+                _rhs = sql._rhs;
+            }
+
+            return this;
 		}
 
 		public Sql Append(string sql, params object[] args)
@@ -2716,6 +2820,171 @@ namespace PetaPoco
 				return _sql.Append("ON " + onClause, args);
 			}
 		}
+
+        public static implicit operator Sql(SqlBuilder.Template template)
+        {
+            return new Sql(true, template.RawSql, template.Parameters);
+        }
 	}
+
+    public class SqlBuilder
+    {
+        Dictionary<string, Clauses> data = new Dictionary<string, Clauses>();
+        int seq;
+
+        class Clause
+        {
+            public string Sql { get; set; }
+            public List<object> Parameters { get; set; }
+        }
+
+        class Clauses : List<Clause>
+        {
+            string joiner;
+            string prefix;
+            string postfix;
+
+            public Clauses(string joiner, string prefix, string postfix)
+            {
+                this.joiner = joiner;
+                this.prefix = prefix;
+                this.postfix = postfix;
+            }
+
+            public string ResolveClauses(List<object> finalParams)
+            {
+                foreach (var item in this)
+                {
+                    item.Sql = Database.ProcessParams(item.Sql, item.Parameters.ToArray(), finalParams);
+                }
+                return prefix + string.Join(joiner, this.Select(c => c.Sql).ToArray()) + postfix;
+            }
+        }
+
+        public class Template
+        {
+            readonly string sql;
+            readonly SqlBuilder builder;
+            private List<object> finalParams = new List<object>();
+            int dataSeq;
+
+            public Template(SqlBuilder builder, string sql, params object[] parameters)
+            {
+                this.sql = Database.ProcessParams(sql, parameters, finalParams);
+                this.builder = builder;
+            }
+
+            static Regex regex = new Regex(@"\/\*\*.+\*\*\/", RegexOptions.Compiled | RegexOptions.Multiline);
+
+            void ResolveSql()
+            {
+                rawSql = sql;
+
+                if (dataSeq != builder.seq)
+                {
+                    foreach (var pair in builder.data)
+                    {
+                        rawSql = rawSql.Replace("/**" + pair.Key + "**/", pair.Value.ResolveClauses(finalParams));
+                    }
+
+                    ReplaceDefaults();
+
+                    dataSeq = builder.seq;
+                }
+
+                if (builder.seq == 0)
+                {
+                    ReplaceDefaults();
+                }
+            }
+
+            private void ReplaceDefaults()
+            {
+                foreach (var pair in builder.defaultsIfEmpty)
+                {
+                    rawSql = rawSql.Replace("/**" + pair.Key + "**/", " " + pair.Value + " ");
+                }
+
+                // replace all that is left with empty
+                rawSql = regex.Replace(rawSql, "");
+            }
+
+            string rawSql;
+
+            public string RawSql { get { ResolveSql(); return rawSql; } }
+            public object[] Parameters { get { ResolveSql(); return finalParams.ToArray(); } }
+        }
+
+
+        public SqlBuilder()
+        {
+        }
+
+        public Template AddTemplate(string sql, params object[] parameters)
+        {
+            return new Template(this, sql, parameters);
+        }
+
+        void AddClause(string name, string sql, object[] parameters, string joiner, string prefix, string postfix)
+        {
+            Clauses clauses;
+            if (!data.TryGetValue(name, out clauses))
+            {
+                clauses = new Clauses(joiner, prefix, postfix);
+                data[name] = clauses;
+            }
+            clauses.Add(new Clause { Sql = sql, Parameters = new List<object>(parameters) });
+            seq++;
+        }
+
+        Dictionary<string, string> defaultsIfEmpty = new Dictionary<string, string>
+        {
+            { "where", "1=1" },
+        };
+
+        public SqlBuilder SelectCols(params string[] columns)
+        {
+            AddClause("selectcols", string.Join(", ", columns), new object[] { }, ", ", ", ", "");
+            return this;
+        }
+
+        public SqlBuilder InnerJoin(string sql, params object[] args)
+        {
+            AddClause("innerjoin", sql, args, "\nINNER JOIN ", "\nINNER JOIN ", "\n");
+            return this;
+        }
+
+        public SqlBuilder LeftJoin(string sql, params object[] args)
+        {
+            AddClause("leftjoin", sql, args, "\nLEFT JOIN ", "\nLEFT JOIN ", "\n");
+            return this;
+        }
+
+        public SqlBuilder Where(string sql, params object[] args)
+        {
+            AddClause("where", sql, args, " AND ", " ( ", " )\n");
+            return this;
+        }
+
+        public SqlBuilder OrderBy(string sql, params object[] args)
+        {
+            AddClause("orderby", sql, args, ", ", "ORDER BY ", "\n");
+            return this;
+        }
+
+        public SqlBuilder OrderByCols(params string[] columns)
+        {
+            AddClause("orderbycols", string.Join(", ", columns), new object[] { }, ", ", ", ", "");
+            return this;
+        }
+    }
+
+    public static class SqlExtensions
+    {
+        public static Sql ToSql(this SqlBuilder.Template template)
+        {
+            return new Sql(true, template.RawSql, template.Parameters);
+        }
+    }
 
 }

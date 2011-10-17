@@ -268,6 +268,23 @@ namespace PetaPoco.Tests
 			Expect(sql.SQL, Is.EqualTo("SELECT *\nFROM articles\nLEFT JOIN comments\nON articles.article_id=comments.article_id"));
 		}
 
+	    [Test] 
+	    public void append_two_sqls()
+	    {
+	        Sql sql1 = Sql.Builder
+	            .Where("Column1 = @0", 1)
+	            .Where("Column2 = @0", 2);
+
+
+	        Sql sql2 = Sql.Builder
+	            .Where("Column3 = @0", 3)
+	            .Where("Column4 = @0", 4);
+
+            Sql finalSql = sql1.Append(sql2);
+
+            Expect(finalSql.SQL, Is.EqualTo("WHERE (Column1 = @0)\nAND (Column2 = @1)\nAND (Column3 = @2)\nAND (Column4 = @3)"));
+	    }
+
 	}
 
 }
