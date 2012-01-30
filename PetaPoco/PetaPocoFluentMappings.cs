@@ -15,11 +15,11 @@ namespace PetaPoco
 
             // Get the table name
             var a = typeConfig.TableName ?? "";
-            TableInfo.TableName = a.Length == 0 ? typeConfig.TableName : a;
+            TableInfo.TableName = a.Length == 0 ? t.Name : a;
 
             // Get the primary key
             a = typeConfig.PrimaryKey ?? "";
-            TableInfo.PrimaryKey = a.Length == 0 ? "Id" : a;
+            TableInfo.PrimaryKey = a.Length == 0 ? "ID" : a;
 
             a = typeConfig.SequenceName ?? "";
             TableInfo.SequenceName = a.Length == 0 ? null : a;
