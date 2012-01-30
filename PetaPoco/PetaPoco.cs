@@ -1,5 +1,5 @@
 /* PetaPoco v4.0.3.8 - A Tiny ORMish thing for your POCO's.
- * Copyright © 2011 Topten Software.  All Rights Reserved.
+ * Copyright ï¿½ 2011 Topten Software.  All Rights Reserved.
  * 
  * Apache License 2.0 - http://www.toptensoftware.com/petapoco/license
  * 
@@ -2011,7 +2011,7 @@ namespace PetaPoco
 
 		    // Do it
 		    var index = 0;
-			var sql = string.Format("DELETE FROM {0} WHERE {1}", tableName, BuildPrimaryKeySql(primaryKeyValuePairs, ref index));
+			var sql = string.Format("DELETE FROM {0} WHERE {1}", EscapeTableName(tableName), BuildPrimaryKeySql(primaryKeyValuePairs, ref index));
 			return Execute(sql, primaryKeyValuePairs.Select(x=>x.Value).ToArray());
 		}
 
