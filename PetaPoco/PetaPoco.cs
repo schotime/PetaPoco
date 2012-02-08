@@ -1676,11 +1676,20 @@ namespace PetaPoco
 						    AddParam(cmd, val, _paramPrefix);
 						}
 
-						cmd.CommandText = string.Format("INSERT INTO {0} ({1}) VALUES ({2})",
-								EscapeTableName(tableName),
-								string.Join(",", names.ToArray()),
-								string.Join(",", values.ToArray())
-								);
+						if (names.Count > 0)
+						{
+							cmd.CommandText = string.Format("INSERT INTO {0} ({1}) VALUES ({2})",
+									EscapeTableName(tableName),
+									string.Join(",", names.ToArray()),
+									string.Join(",", values.ToArray())
+									);
+						}
+						else
+						{
+							cmd.CommandText = string.Format("INSERT INTO {0} DEFAULT VALUES",
+									EscapeTableName(tableName)
+									);
+						}
 
                         object id;
 
