@@ -1935,7 +1935,7 @@ namespace PetaPoco
         {
             var tempIndex = index;
             index += primaryKeyValuePair.Count;
-            return string.Join(" AND ", primaryKeyValuePair.Select((x, i) => string.Format("{0} = @{1}", EscapeSqlIdentifier(x.Key), tempIndex + i)).ToArray());
+            return string.Join(" AND ", primaryKeyValuePair.Select((x, i) => string.Format("{0} = {1}{2}", EscapeSqlIdentifier(x.Key), _paramPrefix, tempIndex + i)).ToArray());
         }
 
         private Dictionary<string, object> GetPrimaryKeyValues(string primaryKeyName, object primaryKeyValue) 
