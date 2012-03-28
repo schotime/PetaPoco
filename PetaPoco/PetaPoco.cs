@@ -1891,6 +1891,11 @@ namespace PetaPoco
 
             var result = Execute(sql, rawvalues.ToArray());
 
+            if (result == 0 && !string.IsNullOrEmpty(versionName) && VersionException == VersionExceptionHandling.Exception)
+            {
+                throw new DBConcurrencyException(string.Format("A Concurrency update occurred in table '{0}' for primary key value(s) = '{1}' and version = '{2}'", tableName, string.Join(",", primaryKeyValuePairs.Values.Select(x => x.ToString()).ToArray()), versionValue));
+            }
+
             // Set Version
             if (!string.IsNullOrEmpty(versionName))
             {
