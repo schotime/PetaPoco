@@ -1690,6 +1690,8 @@ namespace PetaPoco
 
 					    object id;
 
+                        OnInsert(poco, pd, sql, rawvalues);
+
                         if (!autoIncrement)
                         {
                             DoPreExecute(cmd);
@@ -1816,19 +1818,27 @@ namespace PetaPoco
 			}
 		}
 
-		// Insert an annotated poco object
-		public object Insert(object poco)
+        protected virtual void OnInsert(object poco, PocoData pocoData, string sql, List<object> rawValues) { }
+
+        protected virtual void OnUpdate(object poco, PocoData pocoData, string sql, List<object> rawValues) { }
+
+        protected virtual void OnDelete(object poco, PocoData pocoData, string sql, object[] primaryKeyValuePairs) { }
+
+        // Insert an annotated poco object
+
+        public object Insert(object poco)
 		{
 			var pd = PocoData.ForType(poco.GetType());
 			return Insert(pd.TableInfo.TableName, pd.TableInfo.PrimaryKey, pd.TableInfo.AutoIncrement, poco);
 		}
 
-		public int Update(string tableName, string primaryKeyName, object poco, object primaryKeyValue)
+        public int Update(string tableName, string primaryKeyName, object poco, object primaryKeyValue)
 		{
 			return Update(tableName, primaryKeyName, poco, primaryKeyValue, null);
 		}
 
-		// Update a record with values from a poco.  primary key value can be either supplied or read from the poco
+        // Update a record with values from a poco.  primary key value can be either supplied or read from the poco
+
         public int Update(string tableName, string primaryKeyName, object poco, object primaryKeyValue, IEnumerable<string> columns)
 		{
             if (columns != null && !columns.Any())
@@ -1888,6 +1898,8 @@ namespace PetaPoco
                 sql += string.Format(" AND {0} = @{1}", EscapeSqlIdentifier(versionName), index++);
                 rawvalues.Add(versionValue); 
             }
+
+            OnUpdate(poco, pd, sql, rawvalues);
 
             var result = Execute(sql, rawvalues.ToArray());
 
@@ -1953,12 +1965,12 @@ namespace PetaPoco
 			return Update(poco, null, columns);
 		}
 
-		public int Update(object poco)
+        public int Update(object poco)
 		{
 			return Update(poco, null, null);
 		}
 
-		public int Update(object poco, object primaryKeyValue)
+        public int Update(object poco, object primaryKeyValue)
 		{
 			return Update(poco, primaryKeyValue, null);
 		}
@@ -1969,30 +1981,32 @@ namespace PetaPoco
 			return Update(pd.TableInfo.TableName, pd.TableInfo.PrimaryKey, poco, primaryKeyValue, columns);
 		}
 
-		public int Update<T>(string sql, params object[] args)
+        public int Update<T>(string sql, params object[] args)
 		{
 			var pd = PocoData.ForType(typeof(T));
 			return Execute(string.Format("UPDATE {0} {1}", EscapeTableName(pd.TableInfo.TableName), sql), args);
 		}
 
-		public int Update<T>(Sql sql)
+        public int Update<T>(Sql sql)
 		{
 			var pd = PocoData.ForType(typeof(T));
 			return Execute(new Sql(string.Format("UPDATE {0}", EscapeTableName(pd.TableInfo.TableName))).Append(sql));
 		}
 
-		public int Delete(string tableName, string primaryKeyName, object poco)
+        public int Delete(string tableName, string primaryKeyName, object poco)
 		{
 			return Delete(tableName, primaryKeyName, poco, null);
 		}
 
-		public int Delete(string tableName, string primaryKeyName, object poco, object primaryKeyValue)
+        public int Delete(string tableName, string primaryKeyName, object poco, object primaryKeyValue)
 		{
             var primaryKeyValuePairs = GetPrimaryKeyValues(primaryKeyName, primaryKeyValue);
+
+            var pd = PocoData.ForObject(poco, primaryKeyName);
+
 			// If primary key value not specified, pick it up from the object
             if (primaryKeyValue == null)
             {
-                var pd = PocoData.ForObject(poco, primaryKeyName);
                 foreach (var i in pd.Columns)
                 {
                     if (primaryKeyValuePairs.ContainsKey(i.Key))
@@ -2005,10 +2019,15 @@ namespace PetaPoco
 		    // Do it
 		    var index = 0;
 			var sql = string.Format("DELETE FROM {0} WHERE {1}", EscapeTableName(tableName), BuildPrimaryKeySql(primaryKeyValuePairs, ref index));
-			return Execute(sql, primaryKeyValuePairs.Select(x=>x.Value).ToArray());
+
+            var pkvpa = primaryKeyValuePairs.Select(x=>x.Value).ToArray();
+
+            OnDelete(poco, pd, sql, pkvpa);
+
+            return Execute(sql, pkvpa);
 		}
 
-		public int Delete(object poco)
+        public int Delete(object poco)
 		{
 			var pd = PocoData.ForType(poco.GetType());
 			return Delete(pd.TableInfo.TableName, pd.TableInfo.PrimaryKey, poco);
@@ -2915,6 +2934,11 @@ namespace PetaPoco
 			return Append(new Sql(sql, args));
 		}
 
+        public Sql AppendIn(string sql, params object[] args)
+        {
+            return Append(BuildInClause(sql, args), args);
+        }
+
 		static bool Is(Sql sql, string sqltype)
 		{
 			return sql != null && sql._sql != null && sql._sql.StartsWith(sqltype, StringComparison.InvariantCultureIgnoreCase);
@@ -2996,6 +3020,18 @@ namespace PetaPoco
         public static implicit operator Sql(SqlBuilder.Template template)
         {
             return new Sql(true, template.RawSql, template.Parameters);
+        }
+
+        public static string BuildInClause(string sql, params object[] args)
+        {
+            if (!sql.Contains("{0}"))
+            {
+                throw new ArgumentException("Missing string format clause `{0}`. Example `AND Column IN({0})", "sql");
+            }
+
+            var counter = 0;
+
+            return string.Format(sql, string.Join(",", args.Select(a => "@" + (counter++))));
         }
 	}
 
