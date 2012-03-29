@@ -2934,6 +2934,11 @@ namespace PetaPoco
 			return Append(new Sql(sql, args));
 		}
 
+        public Sql AppendIn(string sql, params object[] args)
+        {
+            return Append(BuildInClause(sql, args), args);
+        }
+
 		static bool Is(Sql sql, string sqltype)
 		{
 			return sql != null && sql._sql != null && sql._sql.StartsWith(sqltype, StringComparison.InvariantCultureIgnoreCase);
@@ -3015,6 +3020,18 @@ namespace PetaPoco
         public static implicit operator Sql(SqlBuilder.Template template)
         {
             return new Sql(true, template.RawSql, template.Parameters);
+        }
+
+        public static string BuildInClause(string sql, params object[] args)
+        {
+            if (!sql.Contains("{0}"))
+            {
+                throw new ArgumentException("Missing string format clause `{0}`. Example `AND Column IN({0})", "sql");
+            }
+
+            var counter = 0;
+
+            return string.Format(sql, string.Join(",", args.Select(a => "@" + (counter++))));
         }
 	}
 
