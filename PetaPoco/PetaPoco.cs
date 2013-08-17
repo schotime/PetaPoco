@@ -2129,7 +2129,8 @@ namespace PetaPoco
 
 			// Save it
 			_lastSql = cmd.CommandText;
-			_lastArgs = (from IDataParameter parameter in cmd.Parameters select parameter.Value).ToArray();
+			var parameters = (from IDataParameter parameter in cmd.Parameters select parameter.Value);
+			_lastArgs = parameters.Any() ? parameters.ToArray() : null;
 		}
 
 		public string LastSQL { get { return _lastSql; } }
@@ -2141,7 +2142,8 @@ namespace PetaPoco
 
 		public string FormatCommand(IDbCommand cmd)
 		{
-			return FormatCommand(cmd.CommandText, (from IDataParameter parameter in cmd.Parameters select parameter.Value).ToArray());
+			var parameters = (from IDataParameter parameter in cmd.Parameters select parameter.Value);
+			return FormatCommand(cmd.CommandText, parameters.Any() ? parameters.ToArray() : null);
 		}
 
 		public string FormatCommand(string sql, object[] args)
